@@ -25,7 +25,7 @@ class Options:
   train_devices: tuple = (0,)
   policy_mesh: str = '-1,1,1'
   train_mesh: str = '-1,1,1'
-  profiler: bool = True
+  profiler: bool = False
   expect_devices: int = 0
   use_shardmap: bool = False
   enable_policy: bool = True
@@ -269,8 +269,7 @@ class Agent(embodied.Agent):
     dona = {k: v for k, v in self.params.items() if k not in self.policy_keys}
     with self.train_lock:
       with elements.timer.section('jit_train'):
-        with jax.profiler.StepTraceAnnotation(
-            'train', step_num=int(self.n_updates)):
+        with contextlib.nullcontext():
           self.params, carry, outs, mets = self._train(
               dona, allo, seed, carry, data)
     self.n_updates.increment()
@@ -293,22 +292,24 @@ class Agent(embodied.Agent):
       return_mets = self._take_outs(self.pending_mets)
     self.pending_mets = internal.fetch_async(mets)
 
-    if self.jaxcfg.profiler:
-      outdir, copyto = self.logdir, None
-      if str(outdir).startswith(('gs://', '/gcs/', '/cns/')):
-        copyto = outdir
-        outdir = elements.Path('/tmp/profiler')
-        outdir.mkdir()
-      if self.n_updates == 100:
-        elements.print(f'Start JAX profiler: {str(outdir)}', color='yellow')
-        jax.profiler.start_trace(str(outdir))
-      if self.n_updates == 120:
-        elements.print('Stop JAX profiler', color='yellow')
-        jax.profiler.stop_trace()
-        if copyto:
-          for subdir in elements.Path(outdir).glob('*'):
-            subdir.copy(copyto, recursive=True)
-          print(f'Copied profiler result {outdir} to {copyto}')
+    # JAX profiler is disabled at the code level because start_trace/stop_trace
+    # can hang or crash long training runs in some environments.
+    # if self.jaxcfg.profiler:
+    #   outdir, copyto = self.logdir, None
+    #   if str(outdir).startswith(('gs://', '/gcs/', '/cns/')):
+    #     copyto = outdir
+    #     outdir = elements.Path('/tmp/profiler')
+    #     outdir.mkdir()
+    #   if self.n_updates == 100:
+    #     elements.print(f'Start JAX profiler: {str(outdir)}', color='yellow')
+    #     jax.profiler.start_trace(str(outdir))
+    #   if self.n_updates == 120:
+    #     elements.print('Stop JAX profiler', color='yellow')
+    #     jax.profiler.stop_trace()
+    #     if copyto:
+    #       for subdir in elements.Path(outdir).glob('*'):
+    #         subdir.copy(copyto, recursive=True)
+    #       print(f'Copied profiler result {outdir} to {copyto}')
 
     return carry, return_outs, return_mets
 
